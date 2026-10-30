@@ -1,0 +1,31 @@
+// App icon and version info. The version numbers come from Cargo.toml through build.rs.
+#include <winver.h>
+
+1 ICON "icon.ico"
+
+1 VERSIONINFO
+FILEVERSION     VER_MAJOR, VER_MINOR, VER_PATCH, 0
+PRODUCTVERSION  VER_MAJOR, VER_MINOR, VER_PATCH, 0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "candygoogy"
+      VALUE "FileDescription",  "Sapphire power connector sensors for HWiNFO"
+      VALUE "FileVersion",      VER_STRING
+      VALUE "InternalName",     "phantomlink-sensors"
+      VALUE "LegalCopyright",   "Copyright (c) 2026 candygoogy. MIT License."
+      VALUE "OriginalFilename", "phantomlink-sensors.exe"
+      VALUE "ProductName",      "phantomlink-sensors"
+      VALUE "ProductVersion",   VER_STRING
+      VALUE "Comments",         "https://github.com/candygoogy/phantomlink-sensors"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

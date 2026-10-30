@@ -1,21 +1,38 @@
 //! Per-user install: a copy under %LOCALAPPDATA%\Programs and a Task Scheduler task that starts it
 //! at logon. A logon task (unlike a Run key entry) does not appear under Task Manager > Startup apps.
 
-use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Command;
+
+use windows::core::BSTR;
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::TaskScheduler::{
+    ITaskFolder, ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+};
+use windows::Win32::System::Variant::VARIANT;
 
 const TASK_NAME: &str = "phantomlink-sensors";
-/// Keeps schtasks (a console program) from flashing a window when we run without a console.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn install_dir() -> Result<PathBuf, String> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
     Ok(PathBuf::from(base).join("Programs").join("phantomlink-sensors"))
 }
 
+/// The root folder of the Task Scheduler library, through its COM API.
+fn task_folder() -> Result<ITaskFolder, String> {
+    let err = |what: &str, e: windows::core::Error| format!("Task Scheduler: could not {what} ({e})");
+    unsafe {
+        // Already initialised on this thread is fine; anything else surfaces in CoCreateInstance.
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let service: ITaskService =
+            CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER).map_err(|e| err("start", e))?;
+        let none = VARIANT::default();
+        service.Connect(&none, &none, &none, &none).map_err(|e| err("connect", e))?;
+        service.GetFolder(&BSTR::from("\\")).map_err(|e| err("open the task library", e))
+    }
+}
+
 pub fn is_installed() -> bool {
-    schtasks(&["/Query", "/TN", TASK_NAME]).is_ok()
+    task_folder().is_ok_and(|f| unsafe { f.GetTask(&BSTR::from(TASK_NAME)) }.is_ok())
 }
 
 /// True for the copy the logon task starts.
@@ -38,12 +55,22 @@ pub fn install(extra_args: &str) -> Result<PathBuf, String> {
         std::fs::copy(&current, &target).map_err(|e| format!("could not copy to {}: {e}", target.display()))?;
     }
 
-    let xml_path = std::env::temp_dir().join("phantomlink-sensors-task.xml");
-    write_utf16(&xml_path, &task_xml(&target.display().to_string(), extra_args)?)?;
-    let created = schtasks(&["/Create", "/TN", TASK_NAME, "/XML", &xml_path.display().to_string(), "/F"]);
-    let _ = std::fs::remove_file(&xml_path);
-    created?;
-    schtasks(&["/Run", "/TN", TASK_NAME])?;
+    let xml = task_xml(&target.display().to_string(), extra_args)?;
+    let none = VARIANT::default();
+    unsafe {
+        let task = task_folder()?
+            .RegisterTask(
+                &BSTR::from(TASK_NAME),
+                &BSTR::from(xml),
+                TASK_CREATE_OR_UPDATE.0,
+                &none,
+                &none,
+                TASK_LOGON_INTERACTIVE_TOKEN,
+                &none,
+            )
+            .map_err(|e| format!("could not create the logon task ({e})"))?;
+        task.Run(&none).map_err(|e| format!("created the logon task, but could not start it ({e})"))?;
+    }
     Ok(target)
 }
 
@@ -51,26 +78,14 @@ pub fn install(extra_args: &str) -> Result<PathBuf, String> {
 pub fn uninstall() -> Result<(), String> {
     crate::stop::stop_running();
     if is_installed() {
-        schtasks(&["/Delete", "/TN", TASK_NAME, "/F"])?;
+        unsafe { task_folder()?.DeleteTask(&BSTR::from(TASK_NAME), 0) }
+            .map_err(|e| format!("could not delete the logon task ({e})"))?;
     }
     let dir = install_dir()?;
     if dir.exists() && std::env::current_exe().map_or(true, |e| !e.starts_with(&dir)) {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("could not delete {}: {e}", dir.display()))?;
     }
     Ok(())
-}
-
-fn schtasks(args: &[&str]) -> Result<(), String> {
-    let out = Command::new("schtasks.exe")
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("could not run schtasks: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(format!("schtasks {} failed: {}", args[0], String::from_utf8_lossy(&out.stderr).trim()))
-    }
 }
 
 fn task_xml(exe: &str, args: &str) -> Result<String, String> {
@@ -121,10 +136,4 @@ fn task_xml(exe: &str, args: &str) -> Result<String, String> {
 
 fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-fn write_utf16(path: &std::path::Path, text: &str) -> Result<(), String> {
-    let mut bytes = vec![0xFF, 0xFE];
-    bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
-    std::fs::write(path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
 }

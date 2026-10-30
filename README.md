@@ -72,9 +72,12 @@ No. It talks to the card through the AMD driver. TriXX can run at the same time 
 
 **Windows or my antivirus warns about it.**
 The exe is not code-signed, so SmartScreen may show "Windows protected your PC" (More info, then Run
-anyway), and some antivirus products react to unsigned programs that read GPU hardware or create
-scheduled tasks. Releases are built from this source by GitHub Actions and come with a SHA-256 checksum.
-You can also build it yourself, or add an exclusion for `%LOCALAPPDATA%\Programs\phantomlink-sensors`.
+anyway). Kaspersky flagged v0.2.0 as `VHO:Trojan-Spy.Win32.KeyLogger.gen`, a heuristic guess (that's what
+`VHO` and `.gen` mean) for a new, unsigned program that runs in the background and starts at logon. It is
+a false positive. The tool reads three registers on the graphics card and writes four
+values for HWiNFO; it does not read keyboard input. Releases are built from this source by GitHub Actions
+and come with a SHA-256 checksum. You can also build it yourself, or add an exclusion for
+`%LOCALAPPDATA%\Programs\phantomlink-sensors` and the downloaded exe.
 
 **Can it damage my card?**
 It reads three registers of the sensor chip, the same reads TriXX makes every second, and takes the
