@@ -1,0 +1,35 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        shell: pwsh
+        run: |
+          $exe = "target/release/phantomlink-sensors.exe"
+          Copy-Item $exe phantomlink-sensors.exe
+          (Get-FileHash phantomlink-sensors.exe -Algorithm SHA256).Hash.ToLower() + "  phantomlink-sensors.exe" |
+            Set-Content -NoNewline -Encoding ascii phantomlink-sensors.exe.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phantomlink-sensors
+          path: |
+            phantomlink-sensors.exe
+            phantomlink-sensors.exe.sha256
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" phantomlink-sensors.exe phantomlink-sensors.exe.sha256 --title "${{ github.ref_name }}" --generate-notes

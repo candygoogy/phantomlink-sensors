@@ -1,0 +1,22 @@
+[package]
+name = "phantomlink-sensors"
+version = "0.1.0"
+edition = "2021"
+description = "Feeds the Sapphire NITRO+ RX 9070 XT power connector temperatures into HWiNFO"
+license = "MIT"
+
+[dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
