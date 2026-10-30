@@ -4,7 +4,7 @@ use std::ffi::{c_char, c_int, c_void};
 use std::mem::{size_of, transmute};
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, HMODULE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
@@ -82,6 +82,8 @@ pub struct Adl {
     i2c: WriteAndReadI2c,
     /// Shared lock that HWiNFO, TriXX and other monitoring tools take around ATI I2C traffic.
     i2c_mutex: HANDLE,
+    /// Released on drop, so reconnecting after a driver update loads the new atiadlxx.dll.
+    lib: HMODULE,
 }
 
 macro_rules! proc {
@@ -101,6 +103,16 @@ impl Adl {
             if lib.is_null() {
                 return Err("could not load atiadlxx.dll (is the AMD driver installed?)".into());
             }
+            let adl = Self::init(lib);
+            if adl.is_err() {
+                FreeLibrary(lib);
+            }
+            adl
+        }
+    }
+
+    unsafe fn init(lib: HMODULE) -> Result<Self, String> {
+        unsafe {
             let create = proc!(lib, "ADL2_Main_Control_Create", MainControlCreate);
             let mut ctx = null_mut();
             let rc = create(adl_malloc, 1, &mut ctx);
@@ -115,6 +127,7 @@ impl Adl {
                 adapter_info: proc!(lib, "ADL2_Adapter_AdapterInfo_Get", AdapterInfoGet),
                 i2c: proc!(lib, "ADL2_Display_WriteAndReadI2C", WriteAndReadI2c),
                 i2c_mutex,
+                lib,
             })
         }
     }
@@ -188,6 +201,7 @@ impl Drop for Adl {
             if !self.i2c_mutex.is_null() {
                 CloseHandle(self.i2c_mutex);
             }
+            FreeLibrary(self.lib);
         }
     }
 }

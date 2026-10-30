@@ -194,6 +194,7 @@ fn run(args: &Args) -> Result<(), String> {
             println!("Uninstalled. Restart HWiNFO to drop the sensor.");
             return Ok(());
         }
+        Mode::Run => return run_background(args),
         _ => {}
     }
 
@@ -244,19 +245,49 @@ fn run(args: &Args) -> Result<(), String> {
         println!("temperature:       {}", good(r.temp_danger()));
         println!("current:           {}", good(r.current_danger()));
         println!("status code:       0x{:02x}", r.status);
-        return Ok(());
     }
+    Ok(())
+}
 
-    // Background mode: one instance at a time.
+/// At logon the display driver may still be starting, so the background mode keeps trying this long.
+const STARTUP_RETRY_S: u64 = 120;
+const STARTUP_RETRY_MS: u64 = 5000;
+/// Failed reads in a row before dropping the driver session and connecting again: after a driver update
+/// or reset the old session can stay broken for good.
+const RECONNECT_AFTER: u32 = 5;
+
+fn connect(args: &Args) -> Result<(Adl, i32, Reading), String> {
+    let adl = Adl::open()?;
+    let adapter = pick_adapter(&adl, args.adapter, args.force)?;
+    let first = read(&adl, adapter)?;
+    Ok((adl, adapter, first))
+}
+
+fn run_background(args: &Args) -> Result<(), String> {
+    // One instance at a time.
     unsafe {
         CreateMutexW(std::ptr::null(), 0, wide("Local\\phantomlink-sensors").as_ptr());
         if GetLastError() == ERROR_ALREADY_EXISTS {
             return Err("already running".into());
         }
     }
+    let stop = stop::StopSignal::new();
+
+    let started = std::time::Instant::now();
+    let (adl, adapter, first) = loop {
+        match connect(args) {
+            Ok(c) => break c,
+            Err(e) if started.elapsed().as_secs() < STARTUP_RETRY_S => {
+                eprintln!("{e}; retrying");
+                if stop.wait(STARTUP_RETRY_MS) {
+                    return Ok(());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    };
 
     // Start from a clean sensor so entries from older versions don't linger.
-    let first = read(&adl, adapter)?;
     hwinfo::remove()?;
     let t_12v = hwinfo::Entry::create("Temp0", "12V-2x6 Connector", None)?;
     let t_gc = match first.temp_gc_hpwr {
@@ -266,11 +297,13 @@ fn run(args: &Args) -> Result<(), String> {
     let temp_danger = hwinfo::Entry::create("Other0", "Temperature Danger", Some("Yes/No"))?;
     let current_danger = hwinfo::Entry::create("Other1", "Current Danger", Some("Yes/No"))?;
 
-    let stop = stop::StopSignal::new();
+    let mut conn = Some((adl, adapter));
+    let mut failures = 0;
     let mut reading = Ok(first);
     loop {
         match reading {
             Ok(r) => {
+                failures = 0;
                 t_12v.set_value(r.temp_12v_2x6)?;
                 if let (Some(entry), Some(t)) = (&t_gc, r.temp_gc_hpwr) {
                     entry.set_value(t)?;
@@ -278,13 +311,26 @@ fn run(args: &Args) -> Result<(), String> {
                 temp_danger.set_value(r.temp_danger() as u8)?;
                 current_danger.set_value(r.current_danger() as u8)?;
             }
-            // A missed read now and then (bus busy, driver reset) is not fatal; keep the last values.
-            Err(e) => eprintln!("{e}"),
+            // A missed read now and then (bus busy) is not fatal; keep the last values.
+            Err(e) => {
+                eprintln!("{e}");
+                failures += 1;
+            }
         }
         if stop.wait(args.interval) {
             return Ok(());
         }
-        reading = read(&adl, adapter);
+        if failures >= RECONNECT_AFTER {
+            conn = None; // closes the session and unloads atiadlxx.dll
+        }
+        reading = if let Some((adl, adapter)) = &conn {
+            read(adl, *adapter)
+        } else {
+            connect(args).map(|(adl, adapter, r)| {
+                conn = Some((adl, adapter));
+                r
+            })
+        };
     }
 }
 

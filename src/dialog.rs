@@ -19,13 +19,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::{wide, Adl, Reading};
 
 const TITLE: &str = "phantomlink-sensors";
-const ID_ACTION: i32 = 100;
+const ID_INSTALL: i32 = 100;
+const ID_UNINSTALL: i32 = 101;
 
 struct Dialog<'a> {
     heading: &'a str,
     text: &'a str,
-    /// Label of the main action button (the default), if any.
-    action: Option<&'a str>,
+    /// Custom buttons (ID, label); the first one is the default.
+    actions: &'a [(i32, &'a str)],
     buttons: TASKDIALOG_COMMON_BUTTON_FLAGS,
     warning: bool,
 }
@@ -46,12 +47,16 @@ unsafe extern "system" fn on_event(hwnd: HWND, msg: TASKDIALOG_NOTIFICATIONS, _:
     0
 }
 
-/// Shows the dialog; true if the action button was pressed.
-fn show(d: Dialog) -> bool {
+/// Shows the dialog and returns the ID of the button pressed (0 if it couldn't be shown).
+fn show(d: Dialog) -> i32 {
     let (title, heading, text) = (wide(TITLE), wide(d.heading), wide(d.text));
-    let label = d.action.map(wide);
-    let action: Vec<TASKDIALOG_BUTTON> =
-        label.iter().map(|l| TASKDIALOG_BUTTON { nButtonID: ID_ACTION, pszButtonText: l.as_ptr() }).collect();
+    let labels: Vec<_> = d.actions.iter().map(|&(_, l)| wide(l)).collect();
+    let action: Vec<TASKDIALOG_BUTTON> = d
+        .actions
+        .iter()
+        .zip(&labels)
+        .map(|(&(id, _), l)| TASKDIALOG_BUTTON { nButtonID: id, pszButtonText: l.as_ptr() })
+        .collect();
 
     let mut cfg: TASKDIALOGCONFIG = unsafe { std::mem::zeroed() };
     cfg.cbSize = size_of::<TASKDIALOGCONFIG>() as u32;
@@ -65,69 +70,109 @@ fn show(d: Dialog) -> bool {
     cfg.pszContent = text.as_ptr();
     cfg.cButtons = action.len() as u32;
     cfg.pButtons = action.as_ptr();
-    cfg.nDefaultButton = if action.is_empty() { 0 } else { ID_ACTION };
+    cfg.nDefaultButton = d.actions.first().map_or(0, |&(id, _)| id);
     cfg.pfCallback = Some(on_event);
 
     let mut pressed = 0;
     let hr = unsafe { TaskDialogIndirect(&cfg, &mut pressed, null_mut(), null_mut()) };
-    hr >= 0 && pressed == ID_ACTION
+    if hr >= 0 {
+        pressed
+    } else {
+        0
+    }
 }
 
 fn done(heading: &str, text: &str) {
-    show(Dialog { heading, text, action: None, buttons: TDCBF_OK_BUTTON, warning: false });
+    show(Dialog { heading, text, actions: &[], buttons: TDCBF_OK_BUTTON, warning: false });
 }
 
 fn problem(heading: &str, text: &str) {
-    show(Dialog { heading, text, action: None, buttons: TDCBF_OK_BUTTON, warning: true });
+    show(Dialog { heading, text, actions: &[], buttons: TDCBF_OK_BUTTON, warning: true });
 }
 
-pub fn run() {
-    if crate::install::is_installed() {
-        let uninstall = show(Dialog {
-            heading: "phantomlink-sensors is installed",
-            text: "It runs in the background and starts every time you log in.",
-            action: Some("Uninstall"),
-            buttons: TDCBF_CLOSE_BUTTON,
-            warning: false,
-        });
-        if uninstall {
-            match crate::install::uninstall().and_then(|_| crate::hwinfo::remove()) {
-                Ok(()) => done("Uninstalled", "Restart HWiNFO to remove the Sapphire Power Protection sensor."),
-                Err(e) => problem("Uninstall failed", &e),
-            }
-        }
-        return;
-    }
-
+/// Reads the card; on failure tells the user and returns None.
+fn check_card() -> Option<Reading> {
     let reading = Adl::open().and_then(|adl| {
         let adapter = crate::pick_adapter(&adl, None, false)?;
         crate::read(&adl, adapter)
     });
-    let r = match reading {
-        Ok(r) => r,
-        Err(e) => return problem("Can't read the connector sensors", &format!("{e}\n\nNothing was installed.")),
-    };
+    match reading {
+        Ok(r) => Some(r),
+        Err(e) => {
+            problem("Can't read the connector sensors", &format!("{e}\n\nNothing was installed."));
+            None
+        }
+    }
+}
 
-    let install = show(Dialog {
+fn install_now(heading: &str, text: &str) {
+    match crate::install::install("") {
+        Ok(_) => done(heading, text),
+        Err(e) => problem("Install failed", &e),
+    }
+}
+
+pub fn run() {
+    if crate::install::is_installed() {
+        // A different file than the installed copy (usually a newer release) can replace it.
+        let update = !crate::install::is_same_as_installed();
+        let text = if update {
+            format!(
+                "It runs in the background and starts every time you log in.\n\nThe file you opened is a different \
+                 version ({}). Install it to replace the installed copy.",
+                env!("CARGO_PKG_VERSION")
+            )
+        } else {
+            "It runs in the background and starts every time you log in.".to_string()
+        };
+        let actions: &[(i32, &str)] = if update {
+            &[(ID_INSTALL, "Install this version"), (ID_UNINSTALL, "Uninstall")]
+        } else {
+            &[(ID_UNINSTALL, "Uninstall")]
+        };
+        let pressed = show(Dialog {
+            heading: "phantomlink-sensors is installed",
+            text: &text,
+            actions,
+            buttons: TDCBF_CLOSE_BUTTON,
+            warning: false,
+        });
+        match pressed {
+            ID_INSTALL => {
+                if check_card().is_some() {
+                    install_now(
+                        &format!("Updated to {}", env!("CARGO_PKG_VERSION")),
+                        "The new version is running. HWiNFO keeps showing the sensor; no restart needed.",
+                    );
+                }
+            }
+            ID_UNINSTALL => match crate::install::uninstall().and_then(|_| crate::hwinfo::remove()) {
+                Ok(()) => done("Uninstalled", "Restart HWiNFO to remove the Sapphire Power Protection sensor."),
+                Err(e) => problem("Uninstall failed", &e),
+            },
+            _ => {}
+        }
+        return;
+    }
+
+    let Some(r) = check_card() else { return };
+    let pressed = show(Dialog {
         heading: "Install phantomlink-sensors?",
         text: &format!(
             "Found your Sapphire card. Its power connectors are at:\n\n{}\nThe tool runs in the background, starts \
              when you log in, and adds these readings to HWiNFO. It doesn't need admin rights.",
             describe(&r)
         ),
-        action: Some("Install"),
+        actions: &[(ID_INSTALL, "Install")],
         buttons: TDCBF_CANCEL_BUTTON,
         warning: false,
     });
-    if install {
-        match crate::install::install("") {
-            Ok(_) => done(
-                "Installed and running",
-                "Restart HWiNFO once to see the Sapphire Power Protection sensor. From now on it starts by itself \
-                 when you log in.",
-            ),
-            Err(e) => problem("Install failed", &e),
-        }
+    if pressed == ID_INSTALL {
+        install_now(
+            "Installed and running",
+            "Restart HWiNFO once to see the Sapphire Power Protection sensor. From now on it starts by itself \
+             when you log in.",
+        );
     }
 }
 

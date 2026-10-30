@@ -86,7 +86,12 @@ shared I2C lock that TriXX and HWiNFO use. It never writes to the card.
 **The values in HWiNFO stopped changing.**
 The tool isn't running, and HWiNFO keeps showing the last values it received. Run
 `phantomlink-sensors --once` to check that the card can be read, then start the `phantomlink-sensors`
-task in Task Scheduler or run `--install` again.
+task in Task Scheduler or run `--install` again. (After a graphics driver update the tool reconnects by
+itself within about 10 seconds.)
+
+**How do I update?**
+Download the new release and double-click it. It offers "Install this version", which replaces the
+installed copy; HWiNFO doesn't need a restart.
 
 **How do I remove it?**
 Double-click the exe and click Uninstall, or run `phantomlink-sensors --uninstall`. Either removes the
@@ -96,8 +101,9 @@ logon task, the installed copy and the HWiNFO sensor.
 <summary><b>Install details</b></summary>
 
 Installing (with the Install button or `--install` in a terminal) copies the exe to
-`%LOCALAPPDATA%\Programs\phantomlink-sensors`, registers a Task Scheduler task that starts it 15 seconds
-after you log in, and starts it right away. The task runs with your normal user rights, so there is no
+`%LOCALAPPDATA%\Programs\phantomlink-sensors`, registers a Task Scheduler task that starts it 5 seconds
+after you log in (it keeps trying for two minutes if the graphics driver isn't ready yet), and starts it
+right away. The task runs with your normal user rights, so there is no
 UAC prompt. It does not appear under Task Manager's Startup apps; you can see, disable or delete it in
 Task Scheduler.
 

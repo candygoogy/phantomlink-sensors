@@ -35,6 +35,15 @@ pub fn is_installed() -> bool {
     task_folder().is_ok_and(|f| unsafe { f.GetTask(&BSTR::from(TASK_NAME)) }.is_ok())
 }
 
+/// True if this exe is byte-for-byte the installed copy, i.e. installing it again would change nothing.
+pub fn is_same_as_installed() -> bool {
+    let installed = install_dir().map(|d| d.join("phantomlink-sensors.exe"));
+    match (std::env::current_exe(), installed) {
+        (Ok(me), Ok(installed)) => matches!((std::fs::read(me), std::fs::read(installed)), (Ok(a), Ok(b)) if a == b),
+        _ => false,
+    }
+}
+
 /// True for the copy the logon task starts.
 pub fn is_installed_copy() -> bool {
     match (std::env::current_exe(), install_dir()) {
@@ -93,8 +102,8 @@ fn task_xml(exe: &str, args: &str) -> Result<String, String> {
     let user = std::env::var("USERNAME").map_err(|_| "USERNAME is not set")?;
     let user = escape(&if domain.is_empty() { user } else { format!("{domain}\\{user}") });
     let (exe, args) = (escape(exe), escape(args));
-    // No time limit, keep running on battery, start once the user logs on (with a short delay so
-    // the display driver is up), never a second copy.
+    // No time limit, keep running on battery, start 5 s after the user logs on (the same as HWiNFO; the
+    // background mode retries if the display driver isn't ready yet), never a second copy.
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -105,7 +114,7 @@ fn task_xml(exe: &str, args: &str) -> Result<String, String> {
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>{user}</UserId>
-      <Delay>PT15S</Delay>
+      <Delay>PT5S</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>
