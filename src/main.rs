@@ -7,6 +7,7 @@
 #![windows_subsystem = "windows"]
 
 mod adl;
+mod dialog;
 mod hwinfo;
 mod install;
 mod stop;
@@ -291,10 +292,15 @@ fn main() {
     // Built as a GUI program so the background mode has no console window; borrow the
     // console of whoever started us so --once and --list can still print. Skip that when
     // output is already redirected, or attaching would point it back at the console.
-    unsafe {
-        if GetStdHandle(STD_OUTPUT_HANDLE).is_null() {
-            AttachConsole(ATTACH_PARENT_PROCESS);
-        }
+    let from_terminal = unsafe {
+        !GetStdHandle(STD_OUTPUT_HANDLE).is_null() || AttachConsole(ATTACH_PARENT_PROCESS) != 0
+    };
+
+    // Double-clicked (no terminal, no arguments, not the copy the logon task starts): ask instead of
+    // silently starting in the background.
+    if !from_terminal && std::env::args().len() == 1 && !install::is_installed_copy() {
+        dialog::run();
+        return;
     }
 
     let result = parse_args().and_then(|args| run(&args));

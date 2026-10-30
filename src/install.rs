@@ -1,14 +1,29 @@
 //! Per-user install: a copy under %LOCALAPPDATA%\Programs and a Task Scheduler task that starts it
 //! at logon. A logon task (unlike a Run key entry) does not appear under Task Manager > Startup apps.
 
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 
 const TASK_NAME: &str = "phantomlink-sensors";
+/// Keeps schtasks (a console program) from flashing a window when we run without a console.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn install_dir() -> Result<PathBuf, String> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
     Ok(PathBuf::from(base).join("Programs").join("phantomlink-sensors"))
+}
+
+pub fn is_installed() -> bool {
+    schtasks(&["/Query", "/TN", TASK_NAME]).is_ok()
+}
+
+/// True for the copy the logon task starts.
+pub fn is_installed_copy() -> bool {
+    match (std::env::current_exe(), install_dir()) {
+        (Ok(exe), Ok(dir)) => exe.starts_with(dir),
+        _ => false,
+    }
 }
 
 /// Copies this exe into the install folder, registers the logon task and starts it now.
@@ -35,7 +50,7 @@ pub fn install(extra_args: &str) -> Result<PathBuf, String> {
 /// Stops the background instance, removes the logon task and deletes the installed copy.
 pub fn uninstall() -> Result<(), String> {
     crate::stop::stop_running();
-    if schtasks(&["/Query", "/TN", TASK_NAME]).is_ok() {
+    if is_installed() {
         schtasks(&["/Delete", "/TN", TASK_NAME, "/F"])?;
     }
     let dir = install_dir()?;
@@ -46,7 +61,11 @@ pub fn uninstall() -> Result<(), String> {
 }
 
 fn schtasks(args: &[&str]) -> Result<(), String> {
-    let out = Command::new("schtasks.exe").args(args).output().map_err(|e| format!("could not run schtasks: {e}"))?;
+    let out = Command::new("schtasks.exe")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("could not run schtasks: {e}"))?;
     if out.status.success() {
         Ok(())
     } else {

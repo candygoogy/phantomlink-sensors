@@ -25,13 +25,11 @@ Unofficial. Not affiliated with or endorsed by Sapphire or HWiNFO.
 ## Quick start
 
 1. Download [phantomlink-sensors.exe](https://github.com/candygoogy/phantomlink-sensors/releases/latest/download/phantomlink-sensors.exe).
-2. Open a terminal in the download folder and run:
-   ```
-   .\phantomlink-sensors.exe --install
-   ```
+2. Double-click it. It shows your connector temperatures and asks to install; click **Install**.
 3. Restart HWiNFO.
 
-It now runs in the background and starts again every time you log in.
+It now runs in the background and starts again every time you log in. To remove it, double-click the
+exe again and click **Uninstall**.
 
 ## In HWiNFO
 
@@ -88,17 +86,19 @@ The tool isn't running, and HWiNFO keeps showing the last values it received. Ru
 task in Task Scheduler or run `--install` again.
 
 **How do I remove it?**
-`phantomlink-sensors --uninstall` removes the logon task, the installed copy and the HWiNFO sensor.
+Double-click the exe and click Uninstall, or run `phantomlink-sensors --uninstall`. Either removes the
+logon task, the installed copy and the HWiNFO sensor.
 
 <details>
 <summary><b>Install details</b></summary>
 
-`--install` copies the exe to `%LOCALAPPDATA%\Programs\phantomlink-sensors`, registers a Task Scheduler
-task that starts it 15 seconds after you log in, and starts it right away. The task runs with your normal
-user rights, so there is no UAC prompt. It does not appear under Task Manager's Startup apps; you can see,
-disable or delete it in Task Scheduler.
+Installing (with the Install button or `--install` in a terminal) copies the exe to
+`%LOCALAPPDATA%\Programs\phantomlink-sensors`, registers a Task Scheduler task that starts it 15 seconds
+after you log in, and starts it right away. The task runs with your normal user rights, so there is no
+UAC prompt. It does not appear under Task Manager's Startup apps; you can see, disable or delete it in
+Task Scheduler.
 
-Before installing, `--once` shows whether the tool can read your card:
+From a terminal, `--once` shows whether the tool can read your card without installing anything:
 
 ```
 > phantomlink-sensors --once
@@ -120,7 +120,7 @@ To check the download, compare `Get-FileHash .\phantomlink-sensors.exe` in Power
 
 | Command | What it does |
 |---|---|
-| `phantomlink-sensors` | Run in the background and update HWiNFO every 2 seconds |
+| `phantomlink-sensors` | From a terminal: run in the background and update HWiNFO every 2 seconds. Double-clicked: show the install or uninstall dialog |
 | `--install` | Copy to `%LOCALAPPDATA%\Programs`, start at every logon, and start now |
 | `--uninstall` | Stop it and remove the logon task, the installed copy and the HWiNFO sensor |
 | `--stop` | Stop the background instance |
