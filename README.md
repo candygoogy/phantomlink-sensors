@@ -4,6 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 
+> [!NOTE]
+> **You no longer need this tool.** HWiNFO 8.60 and later reads both connector temperatures natively,
+> including the danger status. Thanks to Martin for adding it. This repository is archived.
+>
+> If you installed it, double-click the exe and click **Uninstall** (or run
+> `phantomlink-sensors --uninstall`), then restart HWiNFO so the sensor doesn't show up twice.
+
 Shows the power connector temperatures of the Sapphire NITRO+ RX 9070 XT PhantomLink in
 [HWiNFO](https://www.hwinfo.com/).
 
